@@ -1,0 +1,157 @@
+import { Link } from 'react-router-dom';
+import type { Experiment } from '@/types';
+import { getStatusLabel, formatDate, daysBetween, daysRemaining } from '@/utils/format';
+import { Users, Calendar, BarChart3, FileCheck2, Pause, Play, AlertTriangle } from 'lucide-react';
+
+interface ExperimentCardProps {
+  experiment: Experiment;
+}
+
+const statusStyles: Record<string, string> = {
+  draft: 'bg-ink-100 text-ink-600 border-ink-200',
+  running: 'bg-brand-50 text-brand-700 border-brand-200',
+  paused: 'bg-amber-50 text-amber-700 border-amber-200',
+  completed: 'bg-blue-50 text-blue-700 border-blue-200',
+  archived: 'bg-ink-100 text-ink-500 border-ink-200',
+};
+
+const statusDotStyles: Record<string, string> = {
+  draft: 'bg-ink-400',
+  running: 'bg-brand-500 animate-pulse',
+  paused: 'bg-amber-500',
+  completed: 'bg-blue-500',
+  archived: 'bg-ink-400',
+};
+
+const ExperimentCard = ({ experiment }: ExperimentCardProps) => {
+  const total = experiment.totalVisitors || experiment.variants.reduce((s, v) => s + v.visitors, 0);
+  const bestVariant = [...experiment.variants].sort((a, b) => b.conversionRate - a.conversionRate)[0];
+  const progress = (() => {
+    const totalDays = daysBetween(experiment.startTime, experiment.endTime);
+    const passed = totalDays - daysRemaining(experiment.endTime);
+    if (totalDays === 0) return 0;
+    return Math.max(0, Math.min(100, (passed / totalDays) * 100));
+  })();
+  const winnerName = experiment.winnerVariantId
+    ? experiment.variants.find((v) => v.id === experiment.winnerVariantId)?.name
+    : undefined;
+
+  return (
+    <Link
+      to={
+        experiment.status === 'completed'
+          ? `/experiments/${experiment.id}/review`
+          : `/experiments/${experiment.id}/dashboard`
+      }
+      className="group relative flex flex-col rounded-2xl bg-white border border-ink-200/70 p-5 shadow-card hover:shadow-card-hover hover:border-brand-300/60 transition-all duration-300 animate-fade-in-up"
+    >
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <span
+              className={`chip border ${statusStyles[experiment.status]}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${statusDotStyles[experiment.status]}`} />
+              {getStatusLabel(experiment.status)}
+            </span>
+            {winnerName && (
+              <span className="chip bg-brand-50 text-brand-700 border border-brand-200">
+                🏆 {winnerName.split(' - ')[0]}
+              </span>
+            )}
+            {experiment.status === 'paused' && (
+              <span className="chip bg-red-50 text-red-600 border border-red-200">
+                <AlertTriangle className="w-3 h-3" />
+                异常暂停
+              </span>
+            )}
+          </div>
+          <h3 className="font-display text-lg font-semibold text-ink-900 tracking-tight text-balance line-clamp-1 group-hover:text-brand-700 transition-colors">
+            {experiment.name}
+          </h3>
+          <p className="mt-1 text-sm text-ink-500 line-clamp-2 text-balance leading-relaxed">
+            {experiment.goal}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-4 text-xs text-ink-500 mb-4">
+        <div className="flex items-center gap-1.5">
+          <Users className="w-3.5 h-3.5 text-ink-400" />
+          <span className="font-mono text-ink-600">{total.toLocaleString()}</span>
+          <span>人参与</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Calendar className="w-3.5 h-3.5 text-ink-400" />
+          <span>{formatDate(experiment.startTime)}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        {experiment.variants.slice(0, 2).map((v) => (
+          <div
+            key={v.id}
+            className={`rounded-xl p-3 border transition-all ${
+              experiment.winnerVariantId === v.id
+                ? 'bg-brand-50/60 border-brand-300/60'
+                : 'bg-ink-50/50 border-ink-100'
+            }`}
+          >
+            <div className="text-[11px] text-ink-500 mb-1 truncate">
+              {v.isControl ? '◯ 对照 ' : '◇ 变体 '}{v.name.split(' - ')[0].split(' ').slice(-1)[0] || 'A'}
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-lg font-semibold text-ink-800">
+                {(v.conversionRate * 100).toFixed(1)}%
+              </span>
+              {bestVariant?.id === v.id && experiment.status !== 'draft' && (
+                <span className="text-[10px] font-medium text-brand-600">领先</span>
+              )}
+            </div>
+            <div className="text-[11px] text-ink-400 mt-0.5">
+              占比 {v.trafficPercent}%
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-auto pt-3 border-t border-ink-100">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] text-ink-500">实验进度</span>
+          <span className="text-[11px] font-medium text-ink-600 font-mono">
+            {progress.toFixed(0)}%
+          </span>
+        </div>
+        <div className="progress-track">
+          <div
+            className="progress-bar"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <div className="flex items-center justify-between mt-3">
+          <div className="flex items-center gap-2">
+            {experiment.status === 'running' ? (
+              <span className="flex items-center gap-1 text-xs text-ink-600">
+                <Play className="w-3 h-3 text-brand-500 fill-brand-500" />
+                进行中
+              </span>
+            ) : experiment.status === 'paused' ? (
+              <span className="flex items-center gap-1 text-xs text-amber-700">
+                <Pause className="w-3 h-3" />
+                已暂停
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs text-blue-700">
+                <FileCheck2 className="w-3 h-3" />
+                可复盘
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 text-xs text-brand-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+            {experiment.status === 'completed' ? '查看复盘' : '查看数据'}
+            <BarChart3 className="w-3.5 h-3.5" />
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+};
+
+export default ExperimentCard;
