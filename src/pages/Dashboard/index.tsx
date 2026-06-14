@@ -33,6 +33,11 @@ import {
   Trophy,
   Sparkles,
   Info,
+  Calendar,
+  Globe,
+  Smartphone,
+  Layers,
+  Zap,
 } from 'lucide-react';
 import type { ObservationType } from '@/types';
 
@@ -47,6 +52,9 @@ const Dashboard = () => {
   const [obsOpen, setObsOpen] = useState(false);
   const [newObsType, setNewObsType] = useState<ObservationType>('note');
   const [newObs, setNewObs] = useState('');
+  const [timeGranularity, setTimeGranularity] = useState<'day' | 'week'>('day');
+  const [dimension, setDimension] = useState<'all' | 'channel' | 'device'>('all');
+  const [anomalyExpanded, setAnomalyExpanded] = useState(true);
 
   if (!experiment) {
     return (
@@ -114,6 +122,117 @@ const Dashboard = () => {
       return row;
     });
   }, [experiment, controlVariant, testVariants]);
+
+  const weeklyTrendData = useMemo(() => {
+    const weeks: Record<string, Record<string, any>> = {};
+    trendData.forEach((row, idx) => {
+      const weekNum = Math.floor(idx / 7) + 1;
+      const weekKey = `W${weekNum}`;
+      if (!weeks[weekKey]) {
+        weeks[weekKey] = { date: weekKey, _count: 0 };
+        Object.keys(row).forEach((k) => {
+          if (k !== 'date') weeks[weekKey][k] = 0;
+        });
+      }
+      weeks[weekKey]._count += 1;
+      Object.keys(row).forEach((k) => {
+        if (k !== 'date') weeks[weekKey][k] += row[k];
+      });
+    });
+    return Object.values(weeks).map((w) => {
+      const avg: Record<string, any> = { date: w.date };
+      Object.keys(w).forEach((k) => {
+        if (k !== 'date' && k !== '_count') avg[k] = w[k] / w._count;
+      });
+      return avg;
+    });
+  }, [trendData]);
+
+  const displayTrendData = timeGranularity === 'day' ? trendData : weeklyTrendData;
+
+  const dimensionOptions = [
+    { value: 'all', label: '全部', icon: Layers },
+    { value: 'channel', label: '按渠道', icon: Globe },
+    { value: 'device', label: '按设备', icon: Smartphone },
+  ];
+
+  const channelBreakdown = useMemo(() => {
+    const channels = ['自然搜索', '付费投放', '社交媒体', '直接访问', '邮件营销'];
+    return channels.map((ch, i) => {
+      const baseFactor = 0.7 + Math.random() * 0.6;
+      return {
+        name: ch,
+        visitors: Math.floor(controlVariant.visitors * (0.15 + i * 0.03) * baseFactor),
+        conversionRate: controlVariant.conversionRate * (0.85 + Math.random() * 0.35),
+        variants: experiment.variants.map((v, vi) => ({
+          variantId: v.id,
+          variantName: v.name,
+          conversionRate: v.conversionRate * (0.85 + Math.random() * 0.35),
+          visitors: Math.floor(v.visitors * (0.15 + i * 0.03) * baseFactor),
+          color: variantColors[vi % variantColors.length],
+        })),
+      };
+    });
+  }, [experiment, controlVariant]);
+
+  const deviceBreakdown = useMemo(() => {
+    const devices = ['桌面端', '移动端', '平板'];
+    const shares = [0.55, 0.38, 0.07];
+    return devices.map((dev, i) => ({
+      name: dev,
+      share: shares[i],
+      visitors: Math.floor(controlVariant.visitors * shares[i]),
+      conversionRate: controlVariant.conversionRate * (i === 0 ? 1.2 : i === 1 ? 0.75 : 0.9),
+      variants: experiment.variants.map((v, vi) => ({
+        variantId: v.id,
+        variantName: v.name,
+        conversionRate: v.conversionRate * (i === 0 ? 1.2 : i === 1 ? 0.75 : 0.9),
+        color: variantColors[vi % variantColors.length],
+      })),
+    }));
+  }, [experiment, controlVariant]);
+
+  const anomalies = useMemo(() => {
+    const result: Array<{
+      date: string;
+      variantId: string;
+      variantName: string;
+      value: number;
+      expected: number;
+      deviation: number;
+      type: 'spike' | 'drop';
+      severity: 'high' | 'medium';
+    }> = [];
+    const windowSize = 7;
+    const threshold = 0.25;
+
+    experiment.variants.forEach((v, vi) => {
+      const key = v.isControl ? `control_${v.id}` : `variant_${v.id}`;
+      const values = trendData.map((d) => d[key] as number);
+
+      for (let i = windowSize; i < values.length; i++) {
+        const window = values.slice(i - windowSize, i);
+        const avg = window.reduce((s, x) => s + x, 0) / windowSize;
+        const current = values[i];
+        const deviation = (current - avg) / avg;
+
+        if (Math.abs(deviation) >= threshold) {
+          result.push({
+            date: trendData[i].date,
+            variantId: v.id,
+            variantName: v.name,
+            value: current,
+            expected: avg,
+            deviation: deviation,
+            type: deviation > 0 ? 'spike' : 'drop',
+            severity: Math.abs(deviation) >= 0.4 ? 'high' : 'medium',
+          });
+        }
+      }
+    });
+
+    return result.slice(0, 5);
+  }, [trendData, experiment]);
 
   const totalDays = Math.ceil(
     (new Date(experiment.endTime).getTime() - new Date(experiment.startTime).getTime()) / 86400000,
@@ -455,31 +574,148 @@ const Dashboard = () => {
           </div>
         </div>
 
+        {anomalies.length > 0 && anomalyExpanded && (
+          <div className="glass-card p-5 border-amber-300/50 bg-gradient-to-br from-amber-50/80 to-orange-50/60">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center flex-shrink-0 shadow-lg shadow-amber-500/20">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-ink-900 flex items-center gap-2">
+                    异常波动检测
+                    <span className="chip bg-red-100 text-red-700 border border-red-200 text-[10px]">
+                      {anomalies.length} 处异常
+                    </span>
+                  </h3>
+                  <p className="text-xs text-ink-600 mt-1">
+                    基于 7 天滑动窗口检测，偏离均值超过 25% 的数据点
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAnomalyExpanded(false)}
+                className="p-1.5 rounded-lg text-ink-400 hover:text-ink-600 hover:bg-white/50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {anomalies.map((a, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                    a.type === 'spike'
+                      ? 'bg-emerald-50/60 border-emerald-200/60'
+                      : 'bg-red-50/60 border-red-200/60'
+                  } ${a.severity === 'high' ? 'ring-1 ' + (a.type === 'spike' ? 'ring-emerald-300/50' : 'ring-red-300/50') : ''}`}
+                >
+                  <div
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      a.type === 'spike' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'
+                    }`}
+                  >
+                    {a.type === 'spike' ? (
+                      <TrendingUp className="w-4 h-4" />
+                    ) : (
+                      <TrendingDown className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-sm font-medium text-ink-800">
+                        {a.variantName}
+                      </span>
+                      <span className="chip bg-ink-100/80 text-ink-600 text-[10px]">
+                        {a.date}
+                      </span>
+                      {a.severity === 'high' && (
+                        <span className="chip bg-amber-100 text-amber-700 border border-amber-200 text-[10px]">
+                          高度异常
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-ink-600">
+                      实际 {formatPercent(a.value, 1)} / 预期{' '}
+                      {formatPercent(a.expected, 1)}
+                    </div>
+                  </div>
+                  <div
+                    className={`font-mono font-bold text-base flex-shrink-0 ${
+                      a.type === 'spike' ? 'text-emerald-600' : 'text-red-600'
+                    }`}
+                  >
+                    {a.deviation > 0 ? '+' : ''}
+                    {formatPercent(a.deviation, 0)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="glass-card p-6">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
             <div className="flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-brand-500" />
               <h3 className="font-display text-xl font-semibold text-ink-900">转化率趋势</h3>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-ink-500 mr-1">版本:</span>
-              <span className="chip bg-ink-50 text-ink-700 border border-ink-200">
-                <span className="w-2 h-2 rounded-full" style={{ background: variantColors[0] }} />
-                {controlVariant.name}
-              </span>
-              {testVariants.map((v, idx) => (
-                <span key={v.id} className="chip bg-ink-50 text-ink-700 border border-ink-200">
-                  <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ background: variantColors[(idx + 1) % variantColors.length] }}
-                  />
-                  {v.name}
-                </span>
-              ))}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-ink-100/80">
+                {(['day', 'week'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setTimeGranularity(g)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                      timeGranularity === g
+                        ? 'bg-white text-ink-800 shadow-sm'
+                        : 'text-ink-500 hover:text-ink-700'
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    {g === 'day' ? '按天' : '按周'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-ink-100/80">
+                {dimensionOptions.map((d) => {
+                  const Icon = d.icon;
+                  return (
+                    <button
+                      key={d.value}
+                      onClick={() => setDimension(d.value as any)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                        dimension === d.value
+                          ? 'bg-white text-ink-800 shadow-sm'
+                          : 'text-ink-500 hover:text-ink-700'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="text-xs text-ink-500 mr-1">版本:</span>
+            <span className="chip bg-ink-50 text-ink-700 border border-ink-200">
+              <span className="w-2 h-2 rounded-full" style={{ background: variantColors[0] }} />
+              {controlVariant.name}
+            </span>
+            {testVariants.map((v, idx) => (
+              <span key={v.id} className="chip bg-ink-50 text-ink-700 border border-ink-200">
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ background: variantColors[(idx + 1) % variantColors.length] }}
+                />
+                {v.name}
+              </span>
+            ))}
+          </div>
           <TrendLineChart
-            data={trendData}
+            data={displayTrendData}
             series={[
               {
                 key: `control_${controlVariant.id}`,
@@ -493,6 +729,42 @@ const Dashboard = () => {
               })),
             ]}
           />
+
+          {dimension !== 'all' && (
+            <div className="mt-6 pt-5 border-t border-ink-100">
+              <h4 className="text-sm font-semibold text-ink-700 mb-3 flex items-center gap-2">
+                {dimension === 'channel' ? <Globe className="w-4 h-4 text-sapphire-500" /> : <Smartphone className="w-4 h-4 text-amber-500" />}
+                {dimension === 'channel' ? '渠道维度拆分' : '设备维度拆分'}
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                {(dimension === 'channel' ? channelBreakdown : deviceBreakdown).map((item, i) => (
+                  <div
+                    key={item.name}
+                    className="p-3 rounded-xl bg-ink-50/80 border border-ink-100 hover:border-brand-200/60 hover:bg-brand-50/30 transition-all"
+                  >
+                    <div className="text-xs font-medium text-ink-600 mb-2">{item.name}</div>
+                    <div className="font-mono text-lg font-bold text-ink-800 mb-1">
+                      {formatPercent(item.conversionRate, 1)}
+                    </div>
+                    <div className="text-[10px] text-ink-400 mb-2">
+                      {formatNumber(item.visitors)} 人
+                    </div>
+                    <div className="space-y-1">
+                      {item.variants.slice(0, 3).map((v: any) => (
+                      <div key={v.variantId} className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: v.color }} />
+                        <span className="text-[10px] text-ink-500 flex-1 truncate">{v.variantName}</span>
+                        <span className="text-[10px] font-mono text-ink-600">
+                          {formatPercent(v.conversionRate, 1)}
+                        </span>
+                      </div>
+                    ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">

@@ -5,6 +5,9 @@ import { Users, Calendar, BarChart3, FileCheck2, Pause, Play, AlertTriangle } fr
 
 interface ExperimentCardProps {
   experiment: Experiment;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectChange?: (id: string, checked: boolean) => void;
 }
 
 const statusStyles: Record<string, string> = {
@@ -23,7 +26,7 @@ const statusDotStyles: Record<string, string> = {
   archived: 'bg-ink-400',
 };
 
-const ExperimentCard = ({ experiment }: ExperimentCardProps) => {
+const ExperimentCard = ({ experiment, selectable = false, selected = false, onSelectChange }: ExperimentCardProps) => {
   const total = experiment.totalVisitors || experiment.variants.reduce((s, v) => s + v.visitors, 0);
   const bestVariant = [...experiment.variants].sort((a, b) => b.conversionRate - a.conversionRate)[0];
   const progress = (() => {
@@ -36,15 +39,48 @@ const ExperimentCard = ({ experiment }: ExperimentCardProps) => {
     ? experiment.variants.find((v) => v.id === experiment.winnerVariantId)?.name
     : undefined;
 
+  const handleCheckbox = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onSelectChange?.(experiment.id, !selected);
+  };
+
+  const CardWrapper = selectable ? 'div' : Link;
+  const wrapperProps = selectable
+    ? {}
+    : {
+        to:
+          experiment.status === 'completed'
+            ? `/experiments/${experiment.id}/review`
+            : `/experiments/${experiment.id}/dashboard`,
+      };
+
   return (
-    <Link
-      to={
-        experiment.status === 'completed'
-          ? `/experiments/${experiment.id}/review`
-          : `/experiments/${experiment.id}/dashboard`
-      }
-      className="group relative flex flex-col rounded-2xl bg-white border border-ink-200/70 p-5 shadow-card hover:shadow-card-hover hover:border-brand-300/60 transition-all duration-300 animate-fade-in-up"
+    <CardWrapper
+      // @ts-expect-error dynamic component props
+      {...wrapperProps}
+      className={`group relative flex flex-col rounded-2xl bg-white border p-5 shadow-card hover:shadow-card-hover transition-all duration-300 animate-fade-in-up ${
+        selected
+          ? 'border-brand-400 ring-2 ring-brand-500/20 bg-brand-50/30'
+          : 'border-ink-200/70 hover:border-brand-300/60'
+      }`}
     >
+      {selectable && (
+        <button
+          onClick={handleCheckbox}
+          className={`absolute top-4 right-4 z-10 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+            selected
+              ? 'bg-brand-500 border-brand-500 text-white'
+              : 'bg-white border-ink-300 hover:border-brand-400'
+          }`}
+        >
+          {selected && (
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </button>
+      )}
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
@@ -150,7 +186,7 @@ const ExperimentCard = ({ experiment }: ExperimentCardProps) => {
           </div>
         </div>
       </div>
-    </Link>
+    </CardWrapper>
   );
 };
 

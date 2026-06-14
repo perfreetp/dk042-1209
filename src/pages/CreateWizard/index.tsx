@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import Header from '@/components/layout/Header';
 import StepIndicator from '@/components/business/StepIndicator';
 import { useExperimentStore } from '@/store/useExperimentStore';
-import type { Variant, Metric, AudienceCondition, MetricType } from '@/types';
+import { useAudienceStore } from '@/store/useAudienceStore';
+import type { Variant, Metric, AudienceCondition, MetricType, Experiment } from '@/types';
 import {
   Info,
   Layers,
@@ -18,6 +19,10 @@ import {
   Target,
   X,
   GripVertical,
+  Copy,
+  Sparkles,
+  FileText,
+  Zap,
 } from 'lucide-react';
 
 const steps = [
@@ -55,9 +60,11 @@ const operatorOptions = [
 
 const CreateWizard = () => {
   const navigate = useNavigate();
-  const { wizardDraft, setWizardDraft, resetWizardDraft, addExperiment } = useExperimentStore();
+  const { wizardDraft, setWizardDraft, resetWizardDraft, addExperiment, experiments } = useExperimentStore();
+  const { audiences } = useAudienceStore();
   const [currentStep, setCurrentStep] = useState(wizardDraft.currentStep || 0);
   const [previewImage, setPreviewImage] = useState<Record<string, string>>({});
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
 
   const goNext = () => setCurrentStep((s) => Math.min(s + 1, 4));
   const goPrev = () => setCurrentStep((s) => Math.max(s - 1, 0));
@@ -152,6 +159,252 @@ const CreateWizard = () => {
     });
   };
 
+  const applyAudienceTemplate = (audienceId: string) => {
+    const aud = audiences.find((a) => a.id === audienceId);
+    if (!aud) return;
+    setWizardDraft({
+      audienceConditions: JSON.parse(JSON.stringify(aud.conditions)),
+      audienceId: aud.id,
+    });
+  };
+
+  const duplicateFromExperiment = (exp: Experiment) => {
+    const newVariants = exp.variants.map((v, i) => ({
+      ...v,
+      id: `variant_${i}_${Date.now()}`,
+      experimentId: '',
+      visitors: 0,
+      conversions: 0,
+      conversionRate: 0,
+    }));
+    const newMetrics = exp.metrics.map((m, i) => ({
+      ...m,
+      id: `m_${Date.now()}_${i}`,
+      experimentId: '',
+    }));
+    setWizardDraft({
+      name: `${exp.name} (副本)`,
+      goal: exp.goal,
+      description: exp.description,
+      pageUrl: exp.pageUrl,
+      variants: newVariants,
+      metrics: newMetrics,
+      audienceConditions: JSON.parse(JSON.stringify(exp.audienceConditions)),
+      audienceId: exp.audienceId,
+      currentStep: 0,
+    });
+    setShowTemplateModal(false);
+  };
+
+  const applyQuickTemplate = (type: 'pricing' | 'landing' | 'signup' | 'cta') => {
+    const templates: Record<string, Partial<typeof wizardDraft>> = {
+      pricing: {
+        name: '定价页优化实验',
+        goal: '测试不同定价方案对付费转化率和GMV的影响',
+        description: '对比不同定价展示方式、套餐组合、价格锚点等设计方案',
+        pageUrl: '/pricing',
+        variants: [
+          {
+            id: `v0_${Date.now()}`,
+            experimentId: '',
+            name: '原始版本 (Control)',
+            description: '现有定价页三档套餐布局',
+            trafficPercent: 34,
+            isControl: true,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+          {
+            id: `v1_${Date.now()}`,
+            experimentId: '',
+            name: '变体 A - 突出推荐版',
+            description: '中间套餐高亮边框 + "最受欢迎"标签 + 年付默认',
+            trafficPercent: 33,
+            isControl: false,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+          {
+            id: `v2_${Date.now()}`,
+            experimentId: '',
+            name: '变体 B - 降价测试',
+            description: '整体价格下调 15%，测试价格弹性',
+            trafficPercent: 33,
+            isControl: false,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+        ],
+        metrics: [
+          {
+            id: `m1_${Date.now()}`,
+            experimentId: '',
+            name: '付费转化率',
+            type: 'conversion_rate',
+            isPrimary: true,
+          },
+          {
+            id: `m2_${Date.now()}`,
+            experimentId: '',
+            name: 'GMV',
+            type: 'gmv',
+            isPrimary: true,
+          },
+          {
+            id: `m3_${Date.now()}`,
+            experimentId: '',
+            name: '每用户收入',
+            type: 'revenue_per_user',
+            isPrimary: false,
+          },
+        ],
+      },
+      landing: {
+        name: '落地页 Hero 区测试',
+        goal: '通过优化落地页首屏，提升首屏点击率和最终转化',
+        description: '测试不同标题、副标题、主视觉、CTA按钮文案的组合效果',
+        pageUrl: '/landing',
+        variants: [
+          {
+            id: `v0_${Date.now()}`,
+            experimentId: '',
+            name: '原始版本 (Control)',
+            description: '功能导向文案 + 产品截图',
+            trafficPercent: 50,
+            isControl: true,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+          {
+            id: `v1_${Date.now()}`,
+            experimentId: '',
+            name: '变体 A - 利益驱动',
+            description: '痛点+解决方案文案 + 结果数据图',
+            trafficPercent: 50,
+            isControl: false,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+        ],
+        metrics: [
+          {
+            id: `m1_${Date.now()}`,
+            experimentId: '',
+            name: '首屏点击率',
+            type: 'ctr',
+            isPrimary: true,
+          },
+          {
+            id: `m2_${Date.now()}`,
+            experimentId: '',
+            name: '注册转化率',
+            type: 'conversion_rate',
+            isPrimary: false,
+          },
+        ],
+      },
+      signup: {
+        name: '注册流程优化实验',
+        goal: '降低注册流程流失率，提升最终完成注册的用户数',
+        description: '测试注册步骤数量、表单布局、进度指示、社交登录等优化方向',
+        pageUrl: '/signup',
+        variants: [
+          {
+            id: `v0_${Date.now()}`,
+            experimentId: '',
+            name: '原始版本 (Control)',
+            description: '5 步注册流程，单列表单',
+            trafficPercent: 50,
+            isControl: true,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+          {
+            id: `v1_${Date.now()}`,
+            experimentId: '',
+            name: '变体 A - 分步引导',
+            description: '进度条 + 分步标题 + 侧边辅助文案',
+            trafficPercent: 50,
+            isControl: false,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+        ],
+        metrics: [
+          {
+            id: `m1_${Date.now()}`,
+            experimentId: '',
+            name: '完成注册率',
+            type: 'conversion_rate',
+            isPrimary: true,
+          },
+          {
+            id: `m2_${Date.now()}`,
+            experimentId: '',
+            name: '平均注册时长',
+            type: 'dwell_time',
+            isPrimary: false,
+          },
+        ],
+      },
+      cta: {
+        name: 'CTA 按钮优化实验',
+        goal: '提升关键 CTA 按钮的点击率',
+        description: '测试按钮颜色、文案、大小、位置、动效等视觉变量',
+        pageUrl: '/home',
+        variants: [
+          {
+            id: `v0_${Date.now()}`,
+            experimentId: '',
+            name: '原始版本 (Control)',
+            description: '蓝色标准按钮，"立即开始"',
+            trafficPercent: 50,
+            isControl: true,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+          {
+            id: `v1_${Date.now()}`,
+            experimentId: '',
+            name: '变体 A - 渐变按钮',
+            description: '翡翠绿渐变 + 微动效 + "免费体验"',
+            trafficPercent: 50,
+            isControl: false,
+            visitors: 0,
+            conversions: 0,
+            conversionRate: 0,
+          },
+        ],
+        metrics: [
+          {
+            id: `m1_${Date.now()}`,
+            experimentId: '',
+            name: 'CTA点击率',
+            type: 'ctr',
+            isPrimary: true,
+          },
+        ],
+      },
+    };
+    const tpl = templates[type];
+    if (tpl) {
+      setWizardDraft({
+        ...wizardDraft,
+        ...tpl,
+        currentStep: 0,
+      } as any);
+    }
+    setShowTemplateModal(false);
+  };
+
   const handleSubmit = () => {
     const id = `exp_${Date.now()}`;
     const newExp = {
@@ -208,6 +461,36 @@ const CreateWizard = () => {
 
               {currentStep === 0 && (
                 <div className="space-y-5 animate-fade-in-up">
+                  <div className="glass-card p-5 bg-gradient-to-br from-emerald-50/60 to-brand-50/60 border-emerald-200/50">
+                    <div className="flex items-start gap-4">
+                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-brand-600 text-white flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+                        <Zap className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-ink-900 mb-1">⚡ 快速开始</h3>
+                        <p className="text-sm text-ink-600 mb-3">
+                          不想从零开始？从已有实验复制配置，或直接使用行业模板，几秒钟就能搭好实验。
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => setShowTemplateModal(true)}
+                            className="btn-secondary-sm"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            选择模板
+                          </button>
+                          <button
+                            onClick={() => setShowTemplateModal(true)}
+                            className="btn-secondary-sm"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            从已有实验复制
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="glass-card p-6 space-y-5">
                     <div>
                       <label className="label-sm block mb-2">实验名称 *</label>
@@ -493,10 +776,28 @@ const CreateWizard = () => {
                           设置实验只对特定人群生效，不设置则面向全部用户
                         </p>
                       </div>
-                      <button onClick={addCondition} className="btn-secondary !py-2 !px-4 text-xs">
-                        <Plus className="w-3.5 h-3.5" />
-                        添加条件
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {audiences.length > 0 && (
+                          <select
+                            className="px-3 py-2 rounded-lg bg-white border border-ink-200 text-sm text-ink-700 outline-none focus:border-brand-400"
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) applyAudienceTemplate(e.target.value);
+                            }}
+                          >
+                            <option value="">应用受众模板</option>
+                            {audiences.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <button onClick={addCondition} className="btn-secondary !py-2 !px-4 text-xs">
+                          <Plus className="w-3.5 h-3.5" />
+                          添加条件
+                        </button>
+                      </div>
                     </div>
                     {wizardDraft.audienceConditions.length === 0 ? (
                       <div className="py-10 text-center rounded-xl border-2 border-dashed border-ink-200 text-ink-400">
@@ -823,6 +1124,136 @@ const CreateWizard = () => {
           </div>
         </div>
       </div>
+
+      {showTemplateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="glass-card w-[680px] max-h-[80vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-ink-200/70">
+              <div>
+                <h3 className="font-display text-lg font-semibold text-ink-900">快速开始</h3>
+                <p className="text-sm text-ink-500 mt-0.5">选择模板或从已有实验复制，快速创建新实验</p>
+              </div>
+              <button
+                onClick={() => setShowTemplateModal(false)}
+                className="p-2 rounded-lg text-ink-400 hover:text-ink-600 hover:bg-ink-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              <div>
+                <h4 className="text-sm font-semibold text-ink-700 mb-3 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  行业模板
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    {
+                      type: 'landing' as const,
+                      title: '落地页测试',
+                      desc: 'Hero 区、首屏点击率优化',
+                      icon: '🎯',
+                    },
+                    {
+                      type: 'pricing' as const,
+                      title: '定价页测试',
+                      desc: '价格策略、套餐组合优化',
+                      icon: '💰',
+                    },
+                    {
+                      type: 'signup' as const,
+                      title: '注册流程',
+                      desc: '注册转化、流程步骤优化',
+                      icon: '📝',
+                    },
+                    {
+                      type: 'cta' as const,
+                      title: 'CTA 按钮',
+                      desc: '按钮文案、颜色、位置测试',
+                      icon: '🔘',
+                    },
+                  ].map((t) => (
+                    <button
+                      key={t.type}
+                      onClick={() => applyQuickTemplate(t.type)}
+                      className="text-left p-4 rounded-xl border border-ink-200 hover:border-brand-300 hover:bg-brand-50/50 transition-all group"
+                    >
+                      <div className="text-2xl mb-2">{t.icon}</div>
+                      <div className="font-medium text-ink-900 group-hover:text-brand-700">
+                        {t.title}
+                      </div>
+                      <div className="text-xs text-ink-500 mt-1">{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold text-ink-700 mb-3 flex items-center gap-2">
+                  <Copy className="w-4 h-4 text-sapphire-500" />
+                  从已有实验复制
+                </h4>
+                <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1 scrollbar-thin">
+                  {experiments.map((exp) => (
+                    <button
+                      key={exp.id}
+                      onClick={() => duplicateFromExperiment(exp)}
+                      className="w-full text-left p-3 rounded-xl border border-ink-200 hover:border-brand-300 hover:bg-brand-50/50 transition-all group flex items-center gap-3"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-ink-100 to-ink-200 flex items-center justify-center flex-shrink-0">
+                        <FileText className="w-5 h-5 text-ink-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-ink-900 group-hover:text-brand-700 truncate">
+                          {exp.name}
+                        </div>
+                        <div className="text-xs text-ink-500 mt-0.5 flex items-center gap-2">
+                          <span>{exp.variants.length} 个版本</span>
+                          <span>·</span>
+                          <span>{exp.metrics.length} 个指标</span>
+                          <span>·</span>
+                          <span>{exp.owner}</span>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-ink-300 group-hover:text-brand-500 flex-shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {audiences.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-ink-700 mb-3 flex items-center gap-2">
+                    <Users className="w-4 h-4 text-emerald-500" />
+                    受众模板
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {audiences.map((aud) => (
+                      <button
+                        key={aud.id}
+                        onClick={() => {
+                          applyAudienceTemplate(aud.id);
+                          setShowTemplateModal(false);
+                        }}
+                        className="px-3 py-2 rounded-lg border border-ink-200 hover:border-emerald-300 hover:bg-emerald-50/50 transition-all text-sm text-ink-700"
+                      >
+                        {aud.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-ink-200/70 bg-ink-50/50 flex justify-end">
+              <button onClick={() => setShowTemplateModal(false)} className="btn-secondary">
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
