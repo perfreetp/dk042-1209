@@ -83,6 +83,8 @@ export default function ReviewPage() {
     markReadyToLaunch,
     updateExperimentStatus,
     updateLaunchStatus,
+    createSnapshot,
+    getLatestSnapshot,
   } = useExperimentStore();
 
   const experiment = getExperiment(id);
@@ -172,7 +174,17 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
   };
 
   const copyShareLink = async () => {
-    const url = `${window.location.origin}/share/experiments/${id}/review`;
+    let url = `${window.location.origin}/share/experiments/${id}/review`;
+    const latest = getLatestSnapshot(id);
+    if (latest) {
+      try {
+        const json = JSON.stringify(latest);
+        const encoded = btoa(unescape(encodeURIComponent(json)));
+        url += `#data=${encoded}`;
+      } catch (e) {
+        console.error('编码快照失败', e);
+      }
+    }
     try {
       await navigator.clipboard.writeText(url);
       setLinkCopied(true);
@@ -322,6 +334,7 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
     if (experiment.status !== 'completed') {
       updateExperimentStatus(experiment.id, 'completed');
     }
+    createSnapshot(experiment.id);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -1067,6 +1080,62 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
                     </div>
                   </div>
                 </div>
+
+                {draft.isWinnerReadyToLaunch && bestVariant && (
+                  <div>
+                    <h4 className="font-semibold text-ink-900 mb-3 flex items-center gap-2">
+                      <Rocket className="w-4 h-4 text-brand-500" />
+                      上线进度
+                    </h4>
+                    <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50/80 to-brand-50/50 border border-emerald-200/50">
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="text-sm font-medium text-ink-800">{(bestVariant as Variant).name}</span>
+                        <span className={`chip border ${launchStatusConfig[launchStatus]?.color}`}>
+                          {(() => {
+                            const Icon = launchStatusConfig[launchStatus]?.icon || Clock;
+                            return <Icon className="w-3 h-3" />;
+                          })()}
+                          {launchStatusConfig[launchStatus]?.label}
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <div className="flex items-center justify-between">
+                          {launchSteps.map((step, i) => {
+                            const currentIdx = launchSteps.findIndex((s) => s.key === launchStatus);
+                            const isActive = i <= currentIdx;
+                            const isCurrent = i === currentIdx;
+                            return (
+                              <div key={step.key} className="flex flex-col items-center relative z-10">
+                                <div
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                                    isActive
+                                      ? isCurrent
+                                        ? 'bg-gradient-to-br from-brand-500 to-emerald-500 text-white shadow-lg shadow-emerald-500/30'
+                                        : 'bg-emerald-500 text-white'
+                                      : 'bg-ink-100 text-ink-400'
+                                  }`}
+                                >
+                                  {isActive && i < currentIdx ? <Check className="w-3.5 h-3.5" /> : i + 1}
+                                </div>
+                                <span className={`text-[10px] mt-1 font-medium ${isActive ? 'text-ink-700' : 'text-ink-400'}`}>
+                                  {step.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="absolute top-4 left-4 right-4 h-0.5 bg-ink-100 -z-0">
+                          <div
+                            className="h-full bg-gradient-to-r from-brand-500 to-emerald-500"
+                            style={{
+                              width: `${(launchSteps.findIndex((s) => s.key === launchStatus) / (launchSteps.length - 1)) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-4 border-t border-ink-100 text-center">
                   <p className="text-xs text-ink-400">

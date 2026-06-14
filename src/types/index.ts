@@ -118,3 +118,43 @@ export interface FunnelStep {
   variantName: string;
   value: number;
 }
+
+export interface ReviewSnapshot {
+  id: string;
+  experimentId: string;
+  version: number;
+  createdAt: string;
+  experiment: {
+    name: string;
+    goal: string;
+    description: string;
+    pageUrl: string;
+    status: ExperimentStatus;
+    startTime: string;
+    endTime: string;
+    createdBy: string;
+    variants: Variant[];
+    metrics: Metric[];
+    winnerVariantId?: string;
+    totalVisitors: number;
+  };
+  review: {
+    conclusion: string;
+    winnerReason: string;
+    lessonsLearned: string;
+    risks: string;
+    isPublished: boolean;
+    author: string;
+    publishedAt?: string;
+    isWinnerReadyToLaunch: boolean;
+    launchStatus?: LaunchStatus;
+    launchUpdatedAt?: string;
+  };
+  significance: Array<{
+    variantId: string;
+    variantName: string;
+    liftPercent: number;
+    confidence: number;
+    isSignificant: boolean;
+  }>;
+}

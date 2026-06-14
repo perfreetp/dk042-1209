@@ -1,22 +1,19 @@
 import { useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useExperimentStore } from '@/store/useExperimentStore';
-import { calculateSignificance } from '@/utils/statistics';
 import {
   formatPercent,
   formatNumber,
   formatDate,
   formatDateTime,
 } from '@/utils/format';
-import type { Variant } from '@/types';
+import type { ReviewSnapshot, Variant, LaunchStatus } from '@/types';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import {
   Trophy,
   CheckCircle2,
   FileText,
-  Users,
-  Target,
   Clock,
   TrendingUp,
   Copy,
@@ -31,56 +28,72 @@ import {
   Rocket,
 } from 'lucide-react';
 
+const launchStatusConfig: Record<string, { label: string; color: string; icon: any }> = {
+  pending: { label: '待上线', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
+  developing: { label: '开发中', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Zap },
+  testing: { label: '测试中', color: 'bg-violet-100 text-violet-700 border-violet-200', icon: Shield },
+  launched: { label: '已上线', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+  cancelled: { label: '已取消', color: 'bg-ink-100 text-ink-600 border-ink-200', icon: Clock },
+};
+
+const launchSteps = [
+  { key: 'pending', label: '待上线' },
+  { key: 'developing', label: '开发中' },
+  { key: 'testing', label: '测试中' },
+  { key: 'launched', label: '已上线' },
+];
+
+function decodeSnapshotFromHash(): ReviewSnapshot | null {
+  try {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#data=')) return null;
+    const encoded = hash.slice(6);
+    const json = decodeURIComponent(escape(atob(encoded)));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 export default function ReviewSharePage() {
   const { id = '' } = useParams();
-  const { getExperiment, getReview } = useExperimentStore();
-  const experiment = getExperiment(id);
-  const review = getReview(id);
+  const { getExperiment, getReview, getLatestSnapshot } = useExperimentStore();
   const reportRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
 
-  const controlVariant = useMemo(
-    () => experiment?.variants.find((v) => v.isControl),
-    [experiment],
-  );
-  const testVariants = useMemo(
-    () => experiment?.variants.filter((v) => !v.isControl) || [],
-    [experiment],
-  );
+  const snapshot = useMemo(() => {
+    const fromUrl = decodeSnapshotFromHash();
+    if (fromUrl) return fromUrl;
+    return getLatestSnapshot(id) || null;
+  }, [id]);
 
-  const sigResults = useMemo(() => {
-    if (!experiment || !controlVariant) return [];
-    return testVariants.map((v) => {
-      const primaryMetric = experiment.metrics.find((m) => m.isPrimary) || experiment.metrics[0];
-      const sig = calculateSignificance(
-        primaryMetric?.id || 'm1',
-        primaryMetric?.name || '转化率',
-        controlVariant.visitors,
-        controlVariant.conversions,
-        v.visitors,
-        v.conversions,
-      );
-      return { variantId: v.id, variantName: v.name, sig };
-    });
-  }, [experiment, controlVariant, testVariants]);
+  const experiment = useMemo(() => {
+    if (snapshot) return snapshot.experiment;
+    return getExperiment(id) || null;
+  }, [snapshot, id]);
+
+  const review = useMemo(() => {
+    if (snapshot) return snapshot.review;
+    const r = getReview(id);
+    return r || null;
+  }, [snapshot, id]);
 
   const bestVariant = useMemo(() => {
     if (!experiment) return null;
     if (experiment.winnerVariantId) {
       return experiment.variants.find((v) => v.id === experiment.winnerVariantId);
     }
-    const sigSig = sigResults.filter((r) => r.sig.isSignificant);
-    if (sigSig.length > 0) {
-      const best = sigSig.sort((a, b) => b.sig.liftPercent - a.sig.liftPercent)[0];
-      return experiment.variants.find((v) => v.id === best.variantId);
+    if (snapshot?.significance) {
+      const sig = snapshot.significance.filter((s) => s.isSignificant);
+      if (sig.length > 0) {
+        const best = sig.sort((a, b) => b.liftPercent - a.liftPercent)[0];
+        return experiment.variants.find((v) => v.id === best.variantId);
+      }
     }
-    return null;
-  }, [experiment, sigResults]);
+    return [...experiment.variants].sort((a, b) => b.conversionRate - a.conversionRate)[0];
+  }, [experiment, snapshot]);
 
-  const totalVisitors = useMemo(() => {
-    return experiment?.variants.reduce((s, v) => s + v.visitors, 0) || 0;
-  }, [experiment]);
-
+  const totalVisitors = experiment?.totalVisitors || 0;
   const totalDays = useMemo(() => {
     if (!experiment) return 0;
     const start = new Date(experiment.startTime).getTime();
@@ -88,22 +101,7 @@ export default function ReviewSharePage() {
     return Math.max(1, Math.floor((end - start) / 86400000));
   }, [experiment]);
 
-  const launchStatus = review?.launchStatus || 'pending';
-
-  const launchStatusConfig: Record<string, { label: string; color: string; icon: any }> = {
-    pending: { label: '待上线', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
-    developing: { label: '开发中', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Zap },
-    testing: { label: '测试中', color: 'bg-violet-100 text-violet-700 border-violet-200', icon: Shield },
-    launched: { label: '已上线', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
-    cancelled: { label: '已取消', color: 'bg-ink-100 text-ink-600 border-ink-200', icon: Clock },
-  };
-
-  const launchSteps = [
-    { key: 'pending', label: '待上线' },
-    { key: 'developing', label: '开发中' },
-    { key: 'testing', label: '测试中' },
-    { key: 'launched', label: '已上线' },
-  ];
+  const launchStatus: LaunchStatus = review?.launchStatus || 'pending';
 
   const copyLink = async () => {
     try {
@@ -119,10 +117,7 @@ export default function ReviewSharePage() {
     if (!reportRef.current) return;
     try {
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false,
+        scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
       });
       const link = document.createElement('a');
       link.download = `${experiment?.name || '实验报告'}-复盘长图.png`;
@@ -138,10 +133,7 @@ export default function ReviewSharePage() {
     if (!reportRef.current) return;
     try {
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false,
+        scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false,
       });
       const imgData = canvas.toDataURL('image/png');
       const imgWidth = 210;
@@ -172,7 +164,7 @@ export default function ReviewSharePage() {
           <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-ink-100 flex items-center justify-center">
             <FileText className="w-8 h-8 text-ink-400" />
           </div>
-          <p className="text-ink-600 mb-2">实验不存在或已被删除</p>
+          <p className="text-ink-600 mb-2">报告不存在或链接已失效</p>
           <Link to="/experiments" className="text-sm text-brand-600 hover:text-brand-700">
             返回实验列表
           </Link>
@@ -193,31 +185,27 @@ export default function ReviewSharePage() {
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div>
-              <div className="text-sm font-medium text-ink-800">实验复盘报告</div>
+              <div className="text-sm font-medium text-ink-800 flex items-center gap-2">
+                实验复盘报告
+                {snapshot && (
+                  <span className="text-[10px] text-ink-400 bg-ink-50 px-2 py-0.5 rounded-full border border-ink-100">
+                    v{snapshot.version} 快照 · {formatDateTime(snapshot.createdAt)}
+                  </span>
+                )}
+              </div>
               <div className="text-xs text-ink-500">{experiment.name}</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={copyLink}
-              className="btn-secondary-sm"
-            >
+            <button onClick={copyLink} className="btn-secondary-sm">
               {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
               {copied ? '已复制链接' : '复制链接'}
             </button>
-            <button
-              onClick={exportAsImage}
-              className="btn-secondary-sm"
-            >
-              <Image className="w-3.5 h-3.5" />
-              长图
+            <button onClick={exportAsImage} className="btn-secondary-sm">
+              <Image className="w-3.5 h-3.5" />长图
             </button>
-            <button
-              onClick={exportAsPDF}
-              className="btn-primary !py-2 !px-4 text-xs"
-            >
-              <Download className="w-3.5 h-3.5" />
-              导出 PDF
+            <button onClick={exportAsPDF} className="btn-primary !py-2 !px-4 text-xs">
+              <Download className="w-3.5 h-3.5" />导出 PDF
             </button>
           </div>
         </div>
@@ -229,6 +217,7 @@ export default function ReviewSharePage() {
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/80 text-brand-700 text-xs font-medium border border-brand-100 mb-4 shadow-sm">
               <Trophy className="w-3.5 h-3.5" />
               A/B 实验复盘报告
+              {snapshot && ` · 版本 ${snapshot.version}`}
             </div>
             <h1 className="text-3xl font-serif font-semibold text-ink-900 mb-3">
               {experiment.name}
@@ -244,9 +233,7 @@ export default function ReviewSharePage() {
               </div>
               <div className="p-4 rounded-2xl bg-ink-50 text-center">
                 <div className="text-xs text-ink-500 mb-1">参与人数</div>
-                <div className="font-mono text-2xl font-bold text-ink-800">
-                  {formatNumber(totalVisitors)}
-                </div>
+                <div className="font-mono text-2xl font-bold text-ink-800">{formatNumber(totalVisitors)}</div>
               </div>
               <div className="p-4 rounded-2xl bg-emerald-50 text-center">
                 <div className="text-xs text-emerald-600 mb-1">胜出版本</div>
@@ -256,15 +243,13 @@ export default function ReviewSharePage() {
               </div>
             </div>
 
-            {bestVariant && (
+            {review?.conclusion && (
               <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-50 to-brand-50 border border-emerald-200/60">
                 <h3 className="font-semibold text-ink-900 mb-3 flex items-center gap-2">
                   <Trophy className="w-4 h-4 text-amber-500" />
                   核心结论
                 </h3>
-                <p className="text-sm text-ink-700 leading-relaxed">
-                  {review?.conclusion || '该实验数据表明胜出版本具有显著优势，建议推进上线。'}
-                </p>
+                <p className="text-sm text-ink-700 leading-relaxed">{review.conclusion}</p>
               </div>
             )}
 
@@ -276,12 +261,8 @@ export default function ReviewSharePage() {
                 </h3>
                 <div className="p-5 rounded-2xl bg-white border border-ink-200">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="font-medium text-ink-800 text-lg">
-                      {(bestVariant as Variant).name}
-                    </span>
-                    <span className="chip bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      🏆 胜出
-                    </span>
+                    <span className="font-medium text-ink-800 text-lg">{(bestVariant as Variant).name}</span>
+                    <span className="chip bg-emerald-50 text-emerald-700 border border-emerald-200">🏆 胜出</span>
                   </div>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
@@ -293,14 +274,17 @@ export default function ReviewSharePage() {
                     <div>
                       <div className="text-[10px] text-ink-400 uppercase tracking-wide mb-1">相对提升</div>
                       <div className="font-mono text-2xl font-bold text-emerald-600">
-                        +
-                        {(sigResults.find((r) => r.variantId === bestVariant.id)?.sig.liftPercent ?? 0).toFixed(1)}%
+                        +{(
+                          snapshot?.significance?.find((s) => s.variantId === bestVariant.id)?.liftPercent ?? 0
+                        ).toFixed(1)}%
                       </div>
                     </div>
                     <div>
                       <div className="text-[10px] text-ink-400 uppercase tracking-wide mb-1">置信度</div>
                       <div className="font-mono text-2xl font-bold text-ink-700">
-                        {(sigResults.find((r) => r.variantId === bestVariant.id)?.sig.confidence ?? 95).toFixed(1)}%
+                        {(
+                          snapshot?.significance?.find((s) => s.variantId === bestVariant.id)?.confidence ?? 95
+                        ).toFixed(1)}%
                       </div>
                     </div>
                   </div>
@@ -308,23 +292,26 @@ export default function ReviewSharePage() {
               </div>
             )}
 
-            {review?.winnerReason && (
-              <div>
-                <h3 className="font-semibold text-ink-900 mb-3">胜出原因</h3>
-                <div className="p-4 rounded-xl bg-ink-50/50 text-sm text-ink-700 leading-relaxed">
-                  {review.winnerReason}
+            <div className="space-y-3">
+              {review?.winnerReason && (
+                <div className="p-4 rounded-xl bg-ink-50/50">
+                  <div className="text-xs font-medium text-ink-600 mb-1">胜出原因</div>
+                  <div className="text-sm text-ink-700">{review.winnerReason}</div>
                 </div>
-              </div>
-            )}
-
-            {review?.lessonsLearned && (
-              <div>
-                <h3 className="font-semibold text-ink-900 mb-3">经验教训</h3>
-                <div className="p-4 rounded-xl bg-ink-50/50 text-sm text-ink-700 leading-relaxed">
-                  {review.lessonsLearned}
+              )}
+              {review?.lessonsLearned && (
+                <div className="p-4 rounded-xl bg-ink-50/50">
+                  <div className="text-xs font-medium text-ink-600 mb-1">经验教训</div>
+                  <div className="text-sm text-ink-700">{review.lessonsLearned}</div>
                 </div>
-              </div>
-            )}
+              )}
+              {review?.risks && (
+                <div className="p-4 rounded-xl bg-ink-50/50">
+                  <div className="text-xs font-medium text-ink-600 mb-1">风险与注意</div>
+                  <div className="text-sm text-ink-700">{review.risks}</div>
+                </div>
+              )}
+            </div>
 
             {review?.isWinnerReadyToLaunch && bestVariant && (
               <div>
@@ -334,9 +321,7 @@ export default function ReviewSharePage() {
                 </h3>
                 <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-50/80 to-brand-50/50 border border-emerald-200/50">
                   <div className="flex items-center justify-between mb-5">
-                    <span className="text-sm font-medium text-ink-800">
-                      {(bestVariant as Variant).name}
-                    </span>
+                    <span className="text-sm font-medium text-ink-800">{(bestVariant as Variant).name}</span>
                     <span className={`chip border ${launchStatusConfig[launchStatus]?.color}`}>
                       {(() => {
                         const Icon = launchStatusConfig[launchStatus]?.icon || Clock;
@@ -352,10 +337,7 @@ export default function ReviewSharePage() {
                         const isActive = i <= currentIdx;
                         const isCurrent = i === currentIdx;
                         return (
-                          <div
-                            key={step.key}
-                            className="flex flex-col items-center relative z-10"
-                          >
+                          <div key={step.key} className="flex flex-col items-center relative z-10">
                             <div
                               className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
                                 isActive
@@ -365,17 +347,9 @@ export default function ReviewSharePage() {
                                   : 'bg-ink-100 text-ink-400'
                               }`}
                             >
-                              {isActive && i < currentIdx ? (
-                                <Check className="w-4 h-4" />
-                              ) : (
-                                i + 1
-                              )}
+                              {isActive && i < currentIdx ? <Check className="w-4 h-4" /> : i + 1}
                             </div>
-                            <span
-                              className={`text-xs mt-2 font-medium ${
-                                isActive ? 'text-ink-700' : 'text-ink-400'
-                              }`}
-                            >
+                            <span className={`text-xs mt-2 font-medium ${isActive ? 'text-ink-700' : 'text-ink-400'}`}>
                               {step.label}
                             </span>
                           </div>
@@ -386,11 +360,7 @@ export default function ReviewSharePage() {
                       <div
                         className="h-full bg-gradient-to-r from-brand-500 to-emerald-500 transition-all"
                         style={{
-                          width: `${
-                            (launchSteps.findIndex((s) => s.key === launchStatus) /
-                              (launchSteps.length - 1)) *
-                            100
-                          }%`,
+                          width: `${(launchSteps.findIndex((s) => s.key === launchStatus) / (launchSteps.length - 1)) * 100}%`,
                         }}
                       />
                     </div>
@@ -401,11 +371,12 @@ export default function ReviewSharePage() {
 
             <div className="pt-4 border-t border-ink-100 text-center">
               <p className="text-xs text-ink-400">
-                报告生成时间：{formatDateTime(new Date().toISOString())} · 负责人：
-                {experiment.createdBy}
+                报告时间：{snapshot ? formatDateTime(snapshot.createdAt) : formatDateTime(new Date().toISOString())} ·
+                负责人：{experiment.createdBy}
+                {snapshot && ` · 快照版本 ${snapshot.version}`}
               </p>
               <Link
-                to={`/experiments/${experiment.id}/review`}
+                to={`/experiments/${experiment.id || id}/review`}
                 className="inline-flex items-center gap-1 mt-3 text-xs text-brand-600 hover:text-brand-700"
               >
                 <ExternalLink className="w-3.5 h-3.5" />

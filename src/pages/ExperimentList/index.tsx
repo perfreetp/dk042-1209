@@ -4,7 +4,7 @@ import StatsOverview from '@/components/business/StatsOverview';
 import ExperimentCard from '@/components/business/ExperimentCard';
 import { useExperimentStore } from '@/store/useExperimentStore';
 import { useAudienceStore } from '@/store/useAudienceStore';
-import type { ExperimentStatus, MetricType, AudienceCondition } from '@/types';
+import type { ExperimentStatus, MetricType, Experiment } from '@/types';
 import {
   Filter,
   ArrowUpDown,
@@ -72,6 +72,65 @@ const presetAudienceValues: Record<string, string[]> = {
   custom: [],
 };
 
+const valueAliases: Record<string, Record<string, string[]>> = {
+  country: {
+    '中国': ['中国', 'china', 'cn', 'CN', 'CHN'],
+    '美国': ['美国', 'usa', 'us', 'US', 'USA', 'united states'],
+    '日本': ['日本', 'japan', 'jp', 'JP', 'JPN'],
+    '德国': ['德国', 'germany', 'de', 'DE', 'DEU'],
+    '英国': ['英国', 'uk', 'UK', 'gb', 'GB', 'britain'],
+    '法国': ['法国', 'france', 'fr', 'FR', 'FRA'],
+    '巴西': ['巴西', 'brazil', 'br', 'BR', 'BRA'],
+    '印度': ['印度', 'india', 'in', 'IN', 'IND'],
+  },
+  device: {
+    '桌面端': ['桌面端', 'desktop', 'Desktop', 'pc', 'PC'],
+    '移动端': ['移动端', 'mobile', 'Mobile', 'phone'],
+    '平板': ['平板', 'tablet', 'Tablet', 'ipad', 'iPad'],
+    'iOS': ['ios', 'iOS', 'iphone', 'iPhone', 'apple'],
+    'Android': ['android', 'Android', '安卓'],
+    'Windows': ['windows', 'Windows', 'win', 'pc'],
+    'macOS': ['macos', 'macOS', 'mac', 'apple'],
+  },
+  user_type: {
+    '新用户': ['新用户', 'new', 'New', 'new_user', 'signup'],
+    '老用户': ['老用户', 'old', 'Old', 'returning', 'retained'],
+    '付费用户': ['付费用户', 'paid', 'Paid', 'paying', 'subscriber', 'vip'],
+    '免费用户': ['免费用户', 'free', 'Free', 'freemium'],
+    'VIP用户': ['VIP用户', 'vip', 'VIP', 'premium', 'member'],
+    '流失用户': ['流失用户', 'churned', 'churn', 'lost', 'inactive'],
+  },
+};
+
+const normalizeMatch = (field: string, filterValue: string, condValues: string[], operator: string): boolean => {
+  const aliases = valueAliases[field]?.[filterValue] || [filterValue];
+  const allTargets = [filterValue, ...aliases];
+  const lowerTargets = allTargets.map((t) => t.toLowerCase());
+
+  const condLower = condValues.map((v) => String(v).toLowerCase());
+
+  switch (operator) {
+    case 'eq':
+      return condLower.some((cv) => lowerTargets.includes(cv));
+    case 'neq':
+      return !condLower.some((cv) => lowerTargets.includes(cv));
+    case 'in':
+      return condLower.some((cv) =>
+        lowerTargets.some((t) => cv.includes(t) || t.includes(cv)),
+      );
+    case 'not_in':
+      return !condLower.some((cv) =>
+        lowerTargets.some((t) => cv.includes(t) || t.includes(cv)),
+      );
+    case 'contains':
+      return condLower.some((cv) =>
+        lowerTargets.some((t) => cv.includes(t) || t.includes(cv)),
+      );
+    default:
+      return false;
+  }
+};
+
 const ExperimentList = () => {
   const { experiments, updateExperimentStatus, reviews } = useExperimentStore();
   const { audiences } = useAudienceStore();
@@ -98,29 +157,32 @@ const ExperimentList = () => {
     return ['全部', ...Array.from(set)];
   }, [experiments]);
 
-  const matchesAudienceCondition = (
-    conditions: AudienceCondition[],
+  const matchesAudienceFilter = (
+    experiment: Experiment,
     field: string,
     targetValue: string,
   ): boolean => {
     if (targetValue === 'all') return true;
+    const conditions = experiment.audienceConditions || [];
+    if (conditions.length === 0) {
+      const aliases = valueAliases[field]?.[targetValue] || [targetValue];
+      const searchable = [
+        experiment.name,
+        experiment.goal,
+        experiment.description,
+        experiment.pageUrl,
+        ...(experiment.variants.map((v) => v.description || '')),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return [targetValue, ...aliases].some(
+        (a) => searchable.includes(a.toLowerCase()),
+      );
+    }
     return conditions.some((c) => {
       if (c.field !== field) return false;
-      const cValue = Array.isArray(c.value) ? c.value : [c.value];
-      switch (c.operator) {
-        case 'eq':
-          return cValue.some((v) => v === targetValue);
-        case 'neq':
-          return !cValue.some((v) => v === targetValue);
-        case 'in':
-          return cValue.some((v) => v.includes(targetValue) || targetValue.includes(v));
-        case 'not_in':
-          return !cValue.some((v) => v.includes(targetValue) || targetValue.includes(v));
-        case 'contains':
-          return cValue.some((v) => v.includes(targetValue) || targetValue.includes(v));
-        default:
-          return false;
-      }
+      const cValue = Array.isArray(c.value) ? c.value.map(String) : [String(c.value)];
+      return normalizeMatch(field, targetValue, cValue, c.operator);
     });
   };
 
@@ -145,13 +207,13 @@ const ExperimentList = () => {
       list = list.filter((e) => e.metrics.some((m) => m.type === filters.metricType));
     }
     if (filters.audienceCountry && filters.audienceCountry !== 'all') {
-      list = list.filter((e) => matchesAudienceCondition(e.audienceConditions, 'country', filters.audienceCountry));
+      list = list.filter((e) => matchesAudienceFilter(e, 'country', filters.audienceCountry));
     }
     if (filters.audienceDevice && filters.audienceDevice !== 'all') {
-      list = list.filter((e) => matchesAudienceCondition(e.audienceConditions, 'device', filters.audienceDevice));
+      list = list.filter((e) => matchesAudienceFilter(e, 'device', filters.audienceDevice));
     }
     if (filters.audienceUserType && filters.audienceUserType !== 'all') {
-      list = list.filter((e) => matchesAudienceCondition(e.audienceConditions, 'user_type', filters.audienceUserType));
+      list = list.filter((e) => matchesAudienceFilter(e, 'user_type', filters.audienceUserType));
     }
     if (filters.dateRange && filters.dateRange !== 'all') {
       const daysMap: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 };
