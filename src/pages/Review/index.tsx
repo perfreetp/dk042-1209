@@ -10,6 +10,8 @@ import {
   getStatusLabel,
 } from '@/utils/format';
 import type { Review, ObservationType, Variant } from '@/types';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 import {
   ArrowLeft,
   Trophy,
@@ -80,6 +82,7 @@ export default function ReviewPage() {
     markWinner,
     markReadyToLaunch,
     updateExperimentStatus,
+    updateLaunchStatus,
   } = useExperimentStore();
 
   const experiment = getExperiment(id);
@@ -95,11 +98,11 @@ export default function ReviewPage() {
     isWinnerReadyToLaunch: review?.isWinnerReadyToLaunch ?? false,
   });
   const [showReportModal, setShowReportModal] = useState(false);
-  const [launchStatus, setLaunchStatus] = useState<'pending' | 'developing' | 'testing' | 'launched' | 'cancelled'>(
-    review?.launchStatus || (draft.isWinnerReadyToLaunch ? 'pending' : 'pending')
-  );
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  const launchStatus = review?.launchStatus || 'pending';
 
   const launchStatusConfig: Record<string, { label: string; color: string; icon: any }> = {
     pending: { label: '待上线', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
@@ -168,6 +171,17 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
     }
   };
 
+  const copyShareLink = async () => {
+    const url = `${window.location.origin}/share/experiments/${id}/review`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (e) {
+      console.error('复制失败', e);
+    }
+  };
+
   const downloadReport = (type: 'md' | 'txt') => {
     const md = generateReportMarkdown();
     const blob = new Blob([md], { type: type === 'md' ? 'text/markdown' : 'text/plain' });
@@ -179,15 +193,61 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
     URL.revokeObjectURL(url);
   };
 
-  const exportAsImage = () => {
-    alert('图片导出功能需要 html2canvas 库支持，当前为 Demo 版本，可通过浏览器截图功能保存报告。');
+  const exportAsImage = async () => {
+    if (!reportRef.current) return;
+    try {
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+      });
+      const link = document.createElement('a');
+      link.download = `${experiment?.name || '实验报告'}-复盘长图.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (e) {
+      console.error('导出图片失败:', e);
+      alert('图片导出失败，请重试');
+    }
+  };
+
+  const exportAsPDF = async () => {
+    if (!reportRef.current) return;
+    try {
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const imgWidth = 210;
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      pdf.save(`${experiment?.name || '实验报告'}-复盘报告.pdf`);
+    } catch (e) {
+      console.error('导出 PDF 失败:', e);
+      alert('PDF 导出失败，请重试');
+    }
   };
 
   const advanceLaunchStatus = () => {
     const idx = launchSteps.findIndex((s) => s.key === launchStatus);
     if (idx >= 0 && idx < launchSteps.length - 1) {
       const next = launchSteps[idx + 1].key as any;
-      setLaunchStatus(next);
+      updateLaunchStatus(id, next);
     }
   };
 
@@ -286,6 +346,13 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
           <span className="text-ink-500 text-xs">返回数据看板</span>
         </Link>
         <div className="flex items-center gap-2">
+          <button
+            onClick={copyShareLink}
+            className="btn-secondary"
+          >
+            {linkCopied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+            {linkCopied ? '已复制链接' : '分享链接'}
+          </button>
           <button
             onClick={() => setShowReportModal(true)}
             className="btn-secondary"
@@ -1039,10 +1106,17 @@ ${launchStatusConfig[launchStatus]?.label || '待上线'}
                 </button>
                 <button
                   onClick={exportAsImage}
-                  className="btn-primary !py-2 !px-4 text-xs"
+                  className="btn-secondary !py-2 !px-4 text-xs"
                 >
                   <Image className="w-3.5 h-3.5" />
-                  导出图片
+                  导出长图
+                </button>
+                <button
+                  onClick={exportAsPDF}
+                  className="btn-primary !py-2 !px-4 text-xs"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  导出 PDF
                 </button>
               </div>
             </div>

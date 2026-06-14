@@ -1,13 +1,14 @@
 import { Link } from 'react-router-dom';
-import type { Experiment } from '@/types';
+import type { Experiment, LaunchStatus } from '@/types';
 import { getStatusLabel, formatDate, daysBetween, daysRemaining } from '@/utils/format';
-import { Users, Calendar, BarChart3, FileCheck2, Pause, Play, AlertTriangle } from 'lucide-react';
+import { Users, Calendar, BarChart3, FileCheck2, Pause, Play, AlertTriangle, Rocket, Zap, Shield, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
 interface ExperimentCardProps {
   experiment: Experiment;
   selectable?: boolean;
   selected?: boolean;
   onSelectChange?: (id: string, checked: boolean) => void;
+  launchStatus?: LaunchStatus;
 }
 
 const statusStyles: Record<string, string> = {
@@ -26,7 +27,15 @@ const statusDotStyles: Record<string, string> = {
   archived: 'bg-ink-400',
 };
 
-const ExperimentCard = ({ experiment, selectable = false, selected = false, onSelectChange }: ExperimentCardProps) => {
+const launchStatusConfig: Record<string, { label: string; color: string; icon: any }> = {
+  pending: { label: '待上线', color: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock },
+  developing: { label: '开发中', color: 'bg-blue-50 text-blue-700 border-blue-200', icon: Zap },
+  testing: { label: '测试中', color: 'bg-violet-50 text-violet-700 border-violet-200', icon: Shield },
+  launched: { label: '已上线', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+  cancelled: { label: '已取消', color: 'bg-ink-50 text-ink-600 border-ink-200', icon: XCircle },
+};
+
+const ExperimentCard = ({ experiment, selectable = false, selected = false, onSelectChange, launchStatus }: ExperimentCardProps) => {
   const total = experiment.totalVisitors || experiment.variants.reduce((s, v) => s + v.visitors, 0);
   const bestVariant = [...experiment.variants].sort((a, b) => b.conversionRate - a.conversionRate)[0];
   const progress = (() => {
@@ -93,6 +102,15 @@ const ExperimentCard = ({ experiment, selectable = false, selected = false, onSe
             {winnerName && (
               <span className="chip bg-brand-50 text-brand-700 border border-brand-200">
                 🏆 {winnerName.split(' - ')[0]}
+              </span>
+            )}
+            {launchStatus && launchStatusConfig[launchStatus] && (
+              <span className={`chip border ${launchStatusConfig[launchStatus].color}`}>
+                {(() => {
+                  const Icon = launchStatusConfig[launchStatus].icon;
+                  return <Icon className="w-3 h-3" />;
+                })()}
+                {launchStatusConfig[launchStatus].label}
               </span>
             )}
             {experiment.status === 'paused' && (

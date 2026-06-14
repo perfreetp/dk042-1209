@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Experiment, Observation, Review, Variant, Metric, AudienceCondition, ExperimentStatus } from '@/types';
+import type { Experiment, Observation, Review, Variant, Metric, AudienceCondition, ExperimentStatus, LaunchStatus } from '@/types';
 import { MOCK_EXPERIMENTS, MOCK_OBSERVATIONS, MOCK_REVIEWS } from '@/data/experiments';
 
 interface WizardDraft {
@@ -34,6 +34,7 @@ interface ExperimentStore {
   upsertReview: (experimentId: string, review: Partial<Review>) => void;
   markWinner: (experimentId: string, variantId: string) => void;
   markReadyToLaunch: (experimentId: string, ready: boolean) => void;
+  updateLaunchStatus: (experimentId: string, status: LaunchStatus) => void;
 }
 
 const defaultDraft: WizardDraft = {
@@ -131,6 +132,18 @@ export const useExperimentStore = create<ExperimentStore>()(
             [experimentId]: {
               ...s.reviews[experimentId],
               isWinnerReadyToLaunch: ready,
+              launchStatus: ready ? 'pending' : undefined,
+            } as Review,
+          },
+        })),
+      updateLaunchStatus: (experimentId, status) =>
+        set((s) => ({
+          reviews: {
+            ...s.reviews,
+            [experimentId]: {
+              ...s.reviews[experimentId],
+              launchStatus: status,
+              launchUpdatedAt: new Date().toISOString(),
             } as Review,
           },
         })),

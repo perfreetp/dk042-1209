@@ -5,6 +5,7 @@ import CreateWizard from '@/pages/CreateWizard';
 import Dashboard from '@/pages/Dashboard';
 import AudiencePage from '@/pages/Audience';
 import ReviewPage from '@/pages/Review';
+import ReviewSharePage from '@/pages/ReviewShare';
 
 export const router = createBrowserRouter([
   {
@@ -45,6 +46,10 @@ export const router = createBrowserRouter([
         element: <Navigate to="/experiments" replace />,
       },
     ],
+  },
+  {
+    path: 'share/experiments/:id/review',
+    element: <ReviewSharePage />,
   },
 ]);
 

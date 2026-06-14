@@ -87,6 +87,8 @@ export interface Observation {
   type: ObservationType;
 }
 
+export type LaunchStatus = 'pending' | 'developing' | 'testing' | 'launched' | 'cancelled';
+
 export interface Review {
   id: string;
   experimentId: string;
@@ -98,6 +100,8 @@ export interface Review {
   author: string;
   publishedAt?: string;
   isWinnerReadyToLaunch: boolean;
+  launchStatus?: LaunchStatus;
+  launchUpdatedAt?: string;
 }
 
 export interface DailyDataPoint {

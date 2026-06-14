@@ -4,7 +4,7 @@ import StatsOverview from '@/components/business/StatsOverview';
 import ExperimentCard from '@/components/business/ExperimentCard';
 import { useExperimentStore } from '@/store/useExperimentStore';
 import { useAudienceStore } from '@/store/useAudienceStore';
-import type { ExperimentStatus, MetricType } from '@/types';
+import type { ExperimentStatus, MetricType, AudienceCondition } from '@/types';
 import {
   Filter,
   ArrowUpDown,
@@ -58,8 +58,22 @@ const metricTypeOptions: { value: MetricType | 'all'; label: string }[] = [
 
 const ownerOptions = ['全部负责人', '张明', '李婷', '王强', '数据分析师-李雷'];
 
+const audienceFieldOptions = [
+  { value: 'country', label: '地区' },
+  { value: 'device', label: '设备类型' },
+  { value: 'user_type', label: '用户类型' },
+  { value: 'custom', label: '自定义属性' },
+];
+
+const presetAudienceValues: Record<string, string[]> = {
+  country: ['中国', '美国', '日本', '德国', '英国', '法国', '巴西', '印度'],
+  device: ['桌面端', '移动端', '平板', 'iOS', 'Android', 'Windows', 'macOS'],
+  user_type: ['新用户', '老用户', '付费用户', '免费用户', 'VIP用户', '流失用户'],
+  custom: [],
+};
+
 const ExperimentList = () => {
-  const { experiments, updateExperimentStatus } = useExperimentStore();
+  const { experiments, updateExperimentStatus, reviews } = useExperimentStore();
   const { audiences } = useAudienceStore();
   const [activeTab, setActiveTab] = useState<ExperimentStatus | 'all'>('all');
   const [sortBy, setSortBy] = useState('recent');
@@ -72,15 +86,43 @@ const ExperimentList = () => {
   const [filters, setFilters] = useState({
     owner: '全部',
     metricType: 'all' as MetricType | 'all',
-    audienceId: 'all' as string,
     dateRange: 'all' as 'all' | '7d' | '30d' | '90d',
     hasWinner: 'all' as 'all' | 'yes' | 'no',
+    audienceCountry: 'all' as string,
+    audienceDevice: 'all' as string,
+    audienceUserType: 'all' as string,
   });
 
   const allOwners = useMemo(() => {
     const set = new Set(experiments.map((e) => e.createdBy));
     return ['全部', ...Array.from(set)];
   }, [experiments]);
+
+  const matchesAudienceCondition = (
+    conditions: AudienceCondition[],
+    field: string,
+    targetValue: string,
+  ): boolean => {
+    if (targetValue === 'all') return true;
+    return conditions.some((c) => {
+      if (c.field !== field) return false;
+      const cValue = Array.isArray(c.value) ? c.value : [c.value];
+      switch (c.operator) {
+        case 'eq':
+          return cValue.some((v) => v === targetValue);
+        case 'neq':
+          return !cValue.some((v) => v === targetValue);
+        case 'in':
+          return cValue.some((v) => v.includes(targetValue) || targetValue.includes(v));
+        case 'not_in':
+          return !cValue.some((v) => v.includes(targetValue) || targetValue.includes(v));
+        case 'contains':
+          return cValue.some((v) => v.includes(targetValue) || targetValue.includes(v));
+        default:
+          return false;
+      }
+    });
+  };
 
   const filtered = useMemo(() => {
     let list = experiments;
@@ -102,8 +144,14 @@ const ExperimentList = () => {
     if (filters.metricType && filters.metricType !== 'all') {
       list = list.filter((e) => e.metrics.some((m) => m.type === filters.metricType));
     }
-    if (filters.audienceId && filters.audienceId !== 'all') {
-      list = list.filter((e) => e.audienceId === filters.audienceId);
+    if (filters.audienceCountry && filters.audienceCountry !== 'all') {
+      list = list.filter((e) => matchesAudienceCondition(e.audienceConditions, 'country', filters.audienceCountry));
+    }
+    if (filters.audienceDevice && filters.audienceDevice !== 'all') {
+      list = list.filter((e) => matchesAudienceCondition(e.audienceConditions, 'device', filters.audienceDevice));
+    }
+    if (filters.audienceUserType && filters.audienceUserType !== 'all') {
+      list = list.filter((e) => matchesAudienceCondition(e.audienceConditions, 'user_type', filters.audienceUserType));
     }
     if (filters.dateRange && filters.dateRange !== 'all') {
       const daysMap: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90 };
@@ -147,7 +195,9 @@ const ExperimentList = () => {
     let count = 0;
     if (filters.owner && filters.owner !== '全部') count++;
     if (filters.metricType && filters.metricType !== 'all') count++;
-    if (filters.audienceId && filters.audienceId !== 'all') count++;
+    if (filters.audienceCountry && filters.audienceCountry !== 'all') count++;
+    if (filters.audienceDevice && filters.audienceDevice !== 'all') count++;
+    if (filters.audienceUserType && filters.audienceUserType !== 'all') count++;
     if (filters.dateRange && filters.dateRange !== 'all') count++;
     if (filters.hasWinner && filters.hasWinner !== 'all') count++;
     return count;
@@ -157,9 +207,11 @@ const ExperimentList = () => {
     setFilters({
       owner: '全部',
       metricType: 'all',
-      audienceId: 'all',
       dateRange: 'all',
       hasWinner: 'all',
+      audienceCountry: 'all',
+      audienceDevice: 'all',
+      audienceUserType: 'all',
     });
   };
 
@@ -427,91 +479,73 @@ const ExperimentList = () => {
         </div>
 
         {showFilters && (
-          <div className="mb-6 p-5 rounded-2xl bg-white border border-ink-200/70 shadow-card grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 animate-fade-in-up">
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
-                <User className="w-3.5 h-3.5 text-ink-400" />
-                负责人
-              </label>
-              <select
-                value={filters.owner}
-                onChange={(e) => setFilters({ ...filters, owner: e.target.value })}
-                className="input-base !py-2 text-sm"
-              >
-                {allOwners.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
-                <Target className="w-3.5 h-3.5 text-ink-400" />
-                指标类型
-              </label>
-              <select
-                value={filters.metricType}
-                onChange={(e) =>
-                  setFilters({ ...filters, metricType: e.target.value as MetricType | 'all' })
-                }
-                className="input-base !py-2 text-sm"
-              >
-                {metricTypeOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
-                <Users className="w-3.5 h-3.5 text-ink-400" />
-                关联受众
-              </label>
-              <select
-                value={filters.audienceId}
-                onChange={(e) => setFilters({ ...filters, audienceId: e.target.value })}
-                className="input-base !py-2 text-sm"
-              >
-                <option value="all">全部受众</option>
-                {audiences.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
-                <CalendarDays className="w-3.5 h-3.5 text-ink-400" />
-                时间范围
-              </label>
-              <select
-                value={filters.dateRange}
-                onChange={(e) =>
-                  setFilters({ ...filters, dateRange: e.target.value as any })
-                }
-                className="input-base !py-2 text-sm"
-              >
-                <option value="all">全部时间</option>
-                <option value="7d">最近 7 天</option>
-                <option value="30d">最近 30 天</option>
-                <option value="90d">最近 90 天</option>
-              </select>
-            </div>
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
-                <Sparkles className="w-3.5 h-3.5 text-ink-400" />
-                胜出状态
-              </label>
-              <div className="flex items-center justify-between">
+          <div className="mb-6 p-5 rounded-2xl bg-white border border-ink-200/70 shadow-card animate-fade-in-up">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
+                  <User className="w-3.5 h-3.5 text-ink-400" />
+                  负责人
+                </label>
+                <select
+                  value={filters.owner}
+                  onChange={(e) => setFilters({ ...filters, owner: e.target.value })}
+                  className="input-base !py-2 text-sm w-full"
+                >
+                  {allOwners.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
+                  <Target className="w-3.5 h-3.5 text-ink-400" />
+                  指标类型
+                </label>
+                <select
+                  value={filters.metricType}
+                  onChange={(e) =>
+                    setFilters({ ...filters, metricType: e.target.value as MetricType | 'all' })
+                  }
+                  className="input-base !py-2 text-sm w-full"
+                >
+                  {metricTypeOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
+                  <CalendarDays className="w-3.5 h-3.5 text-ink-400" />
+                  时间范围
+                </label>
+                <select
+                  value={filters.dateRange}
+                  onChange={(e) =>
+                    setFilters({ ...filters, dateRange: e.target.value as any })
+                  }
+                  className="input-base !py-2 text-sm w-full"
+                >
+                  <option value="all">全部时间</option>
+                  <option value="7d">最近 7 天</option>
+                  <option value="30d">最近 30 天</option>
+                  <option value="90d">最近 90 天</option>
+                </select>
+              </div>
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-700 mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-ink-400" />
+                  胜出状态
+                </label>
                 <select
                   value={filters.hasWinner}
                   onChange={(e) =>
                     setFilters({ ...filters, hasWinner: e.target.value as any })
                   }
-                  className="input-base !py-2 text-sm"
+                  className="input-base !py-2 text-sm w-full"
                 >
                   <option value="all">全部</option>
                   <option value="yes">已有胜出版本</option>
@@ -519,7 +553,71 @@ const ExperimentList = () => {
                 </select>
               </div>
             </div>
-            <div className="col-span-2 md:col-span-3 lg:col-span-5 flex items-center justify-between pt-2 border-t border-ink-100">
+
+            <div className="pt-5 border-t border-ink-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="w-4 h-4 text-emerald-500" />
+                <span className="text-xs font-semibold text-ink-700">受众条件组合检索</span>
+                <span className="text-[10px] text-ink-400">
+                  匹配使用该条件的所有实验，不限于某个受众模板
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-ink-500 mb-1.5 block">地区</label>
+                  <select
+                    value={filters.audienceCountry}
+                    onChange={(e) =>
+                      setFilters({ ...filters, audienceCountry: e.target.value })
+                    }
+                    className="input-base !py-2 text-sm w-full"
+                  >
+                    <option value="all">不限地区</option>
+                    {presetAudienceValues.country.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-ink-500 mb-1.5 block">设备类型</label>
+                  <select
+                    value={filters.audienceDevice}
+                    onChange={(e) =>
+                      setFilters({ ...filters, audienceDevice: e.target.value })
+                    }
+                    className="input-base !py-2 text-sm w-full"
+                  >
+                    <option value="all">不限设备</option>
+                    {presetAudienceValues.device.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-ink-500 mb-1.5 block">用户类型</label>
+                  <select
+                    value={filters.audienceUserType}
+                    onChange={(e) =>
+                      setFilters({ ...filters, audienceUserType: e.target.value })
+                    }
+                    className="input-base !py-2 text-sm w-full"
+                  >
+                    <option value="all">不限用户类型</option>
+                    {presetAudienceValues.user_type.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-4 mt-5 border-t border-ink-100">
               <span className="text-xs text-ink-400">
                 筛选结果：共 <b className="text-ink-700">{filtered.length}</b> 个实验
               </span>
@@ -564,6 +662,7 @@ const ExperimentList = () => {
                 selectable={selectMode}
                 selected={selectedIds.includes(exp.id)}
                 onSelectChange={handleSelectChange}
+                launchStatus={reviews[exp.id]?.launchStatus}
               />
             </div>
           ))}
